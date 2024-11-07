@@ -5,6 +5,7 @@ import math
 
 import rclpy
 from rclpy.node import Node
+from rclpy.clock import Clock
 from sensor_msgs.msg import LaserScan
 from nav_msgs.msg import Odometry
 from ament_index_python.packages import get_package_share_directory
@@ -18,17 +19,21 @@ class DataLoggerNode(Node):
         
     
         pkg = get_package_share_directory('icp_life_story')
-        save_file = os.path.join(pkg, 'laser_odom_data.dat')
+        # save_file = os.path.join(pkg, 'laser_odom_data.dat')
         
         
-        self.file = open(save_file, "w")
+        # self.file = open(save_file, "w")
         
+        # output_file_path = '/ros2_ws/src/developer_packages/icp_life_story/test.dat'
+        # Open the file for writing
+        self.file = open("test.dat", "w")
         
         self.laser_subscription = self.create_subscription(LaserScan,'/scan',self.laser_callback,10)   # SUBSCRIBER
         self.odom_subscription = self.create_subscription(Odometry,'/odom',self.odom_callback,10)
 
-        self.cur_time = self.get_clock().now() #node_time
-        self.last_time = self.cur_time
+        self.cur_time =  rclpy.clock.Clock().now()
+        self.cur_time_sec = self.cur_time.seconds_nanoseconds()[0]
+        self.cur_time_nanosec = self.cur_time.seconds_nanoseconds()[1]
 
         # scan params
         scan_no_max = 726 #for simpleURG
@@ -65,14 +70,21 @@ class DataLoggerNode(Node):
 
         self.scan_time_secs = message.header.stamp.sec
         self.scan_time_nsecs = message.header.stamp.nanosec
-        for i in range (0, self.angle_total_n * 2, 4):
-            #Measurement angle index (DEG)
-            self.scan[int(i/2)] = (self.angle_min + (i/2) * self.angle_increment) * 180 / 3.14 
-            if math.isnan(message.ranges[int(i/2)]):                                                        #START FROM HERE        # DOUBLE NO ARRAY ( OUT OF RANGE )
-                #When the measurement data is nan (outside the measurement range), 0 is assigned
-                self.scan[int(i/2)+1] = 0 
+        for i in range(0, self.angle_total_n, 2):
+            # Calculate the measurement angle in degrees
+            angle_deg = (self.angle_min + i * self.angle_increment) * 180 / 3.14
+            self.scan[int(i / 2)] = angle_deg
+
+            # Check if the range data at index i is NaN and handle it
+            if i < len(message.ranges) and math.isnan(message.ranges[i]):
+                # Assign 0 if the data is NaN
+                self.scan[int(i) + 1] = 0
+            elif i < len(message.ranges):
+                # Otherwise, use the actual data
+                self.scan[int(i) + 1] = message.ranges[i]
             else:
-                self.scan[int(i/2)+1] = message.ranges[int(i/2)] #scan data
+                # Handle any out-of-range indices (optional)
+                self.scan[int(i) + 1] = 0
     
     def odom_callback(self, message):
 
@@ -95,6 +107,8 @@ class DataLoggerNode(Node):
             orientation_q.z,
             orientation_q.w
     )
+        
+        self.write_data()
     
     # Convert quaternion to Euler angles
         roll, pitch, self.yaw = euler_from_quaternion(quaternion) # yaw ထုတ်
@@ -115,8 +129,8 @@ class DataLoggerNode(Node):
         if self.scan_no > 0 : #Make the same format as the input data file of SLAM in this book
             output_list =["LASERSCAN"]
             output_list.append(self.scan_no)
-            output_list.append(self.cur_time.sec)     #မူရင်းမှာ scan time မယူ (node time ပဲယူ)
-            output_list.append(self.cur_time.nanosesc)
+            output_list.append(self.cur_time_sec)     #မူရင်းမှာ scan time မယူ (node time ပဲယူ)
+            output_list.append(self.cur_time_nanosec)
             output_list.append('340') #(723-44)/2 Save scan data from the sensor in half.
             for i in range (44, 724, 1): #Roughly saves scan data from -120deg to 120deg
                 output_list.append(self.scan[i])
@@ -125,6 +139,18 @@ class DataLoggerNode(Node):
             output_list.append(self.yaw) #Save with Odometry rotation angle RAD
             output_list.append(self.scan_time_secs)
             output_list.append(self.scan_time_nsecs)  # မူရင်းမှာ odom time stamp မယူထား (scan_time ယူ)
+
+            # output_list.append(1)
+            # output_list.append(2.97)     #မူရင်းမှာ scan time မယူ (node time ပဲယူ)
+            # output_list.append(432)
+            # output_list.append('340') #(723-44)/2 Save scan data from the sensor in half.
+            # for i in range (44, 724, 1): #Roughly saves scan data from -120deg to 120deg
+            #     output_list.append(4)
+            # output_list.append(self.position_x) #Odometry X direction
+            # output_list.append(self.position_y) #Odometry Y direction
+            # output_list.append(self.yaw) #Save with Odometry rotation angle RAD
+            # output_list.append(self.scan_time_secs)
+            # output_list.append(self.scan_time_nsecs)  # မူရင်းမှာ odom time stamp မယူထား (scan_time ယူ)
             for d in output_list:
                 self.file.write("%s " %d)
             self.file.write("\n")
